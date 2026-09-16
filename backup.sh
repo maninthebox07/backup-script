@@ -50,7 +50,7 @@ restore() {
 
     echo "Restoring file from drive."
     log "Restoring file from drive"
-    rclone copy "gdrive:files-backup/$1" "$BACKUP_DIR"
+    rclone copy "gdrive:files-backup/$1" "$HOME"
 
     if [ $? -ne 0 ]; then
         echo "Error restoring the file."
@@ -72,13 +72,17 @@ restore() {
 
         echo "Extracting backup."
         log "Extracting backup"
-        tar -xzf "$BACKUP_DIR/$1" -C "$2"
+        tar -xzf "$HOME/$1" -C "$2"
 
         if [ $? -ne 0 ]; then
             echo "Error extracting backup."
             log "Error extracting backup"
             return 1
         fi
+
+        echo "$1 was restored and extracted to $2"
+    else
+        echo "$1 was restored to $HOME"
     fi
 }
 
