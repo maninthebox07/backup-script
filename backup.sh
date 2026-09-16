@@ -3,6 +3,7 @@
 BACKUP_DIR="$HOME/Backups"
 DATE=$(date +%Y-%m-%d-%H-%M-%S)
 LOG_FILE="$HOME/Projects/bash-projects/backup-script/backup.log"
+DRY_RUN=false
 
 mkdir -p "$BACKUP_DIR"
 
@@ -40,6 +41,40 @@ Examples:
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+file_compression() {
+    BASE_NAME=$(basename "$1")
+    DIR_NAME=$(dirname "$1")
+    
+    if [ "$DRY_RUN" == false ]; then
+        if [ -e "$1" ]; then
+
+            log "Creating compressed file"
+            tar -czf "$BACKUP_DIR/$BASE_NAME-$DATE.tar.gz" \
+                -C "$DIR_NAME" "$BASE_NAME"
+
+            if [ $? -ne 0 ]; then
+                echo "Error creating backup for $1."
+                log "Error creating backup for $1"
+                return 1
+            fi
+
+            log "$1 compressed"
+        else
+            echo "$1 is not a file or directory."
+            log "$1 is not a file or directory"
+            return 1
+        fi
+    else
+        if [ -e "$1" ]; then
+            echo "[DRY-RUN] Would compress: $1"
+            echo "[DRY-RUN] Would create: $BACKUP_DIR/$BASE_NAME-$DATE.tar.gz"
+        else
+            echo "[DRY-RUN] $1 is not a file or directory."
+            return 1
+        fi
+    fi
 }
 
 restore() {
@@ -86,6 +121,17 @@ restore() {
     fi
 }
 
+list() {
+    log "Listing remote"
+    rclone tree gdrive:files-backup
+
+    if [ $? -ne 0 ]; then
+        log "Error listing remote"
+        return 1
+    fi
+    log "Remote listed"
+}
+
 log "Starting backup"
 
 if [ "$#" -eq 0 ]; then
@@ -114,32 +160,19 @@ while [ "$#" -gt 0 ]; do
             ;;
 
         -l | --list)
-            echo ""
+            list
+            exit 0
             ;;
 
         -d | --dry-run)
-            echo ""
+            DRY_RUN=true
+            log "[DRY-RUN] Running with dry-run"
             ;;
 
         *)
-            if [ -e "$1" ]; then
-                BASE_NAME=$(basename "$1")
-                DIR_NAME=$(dirname "$1")
+            file_compression "$1"
 
-                log "Creating compressed file"
-                tar -czf "$BACKUP_DIR/$BASE_NAME-$DATE.tar.gz" \
-                    -C "$DIR_NAME" "$BASE_NAME"
-
-                if [ $? -ne 0 ]; then
-                    echo "Error creating backup for $1."
-                    log "Error creating backup for $1"
-                    exit 1
-                fi
-
-                log "$1 compressed"
-            else
-                echo "$1 is not a file or directory."
-                log "$1 is not a file or directory"
+            if [ $? -ne 0 ]; then
                 exit 1
             fi
             ;;
@@ -148,18 +181,30 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-log "Sending to drive"
-
-rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
-    --backup-dir "gdrive:files-history/$DATE" \
-    --progress
+if [ "$DRY_RUN" == true ]; then
+    log "[DRY-RUN] Sending to drive"
+    rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
+        --backup-dir "gdrive:files-history/$DATE" \
+        --progress \
+        --dry-run
+else
+    log "Sending to drive"
+    rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
+        --backup-dir "gdrive:files-history/$DATE" \
+        --progress
+fi
 
 if [ $? -ne 0 ]; then
     echo "rclone: Error sending to drive."
     log "rclone: Error sending to drive"
     exit 1
 else
-    echo "File(s) successfully sent to Drive."
-    log "File(s) successfully sent to Drive"
-    log "Backup completed successfully"
+    if [ "$DRY_RUN" == true ]; then
+        echo "[DRY-RUN] Backup simulation completed."
+        log "[DRY-RUN] Backup simulation completed"
+    else
+        echo "File(s) successfully sent to Drive."
+        log "File(s) successfully sent to Drive"
+        log "Backup completed successfully"
+    fi
 fi
