@@ -49,6 +49,15 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
+ctrl_c() {
+    echo -e "\nBackup interrupted."
+    log "Backup interrupted by user"
+
+    exit 130
+}
+
+trap ctrl_c INT
+
 file_compression() {
     BASE_NAME=$(basename "$1")
     DIR_NAME=$(dirname "$1")
@@ -318,5 +327,4 @@ if [ "${#FILES[@]}" -gt 0 ]; then
             log "Backup completed successfully"
         fi
     fi
-
 fi
