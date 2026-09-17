@@ -4,8 +4,7 @@ BACKUP_DIR="$HOME/Backups"
 DATE=$(date +%Y-%m-%d-%H-%M-%S)
 LOG_FILE="$HOME/Projects/bash-projects/backup-script/backup.log"
 DRY_RUN=false
-
-mkdir -p "$BACKUP_DIR"
+DEPENDENCIES=("tar" "rclone")
 
 usage() {
     echo "Usage: ./backup.sh [OPTIONS] <file|directory> ...
@@ -46,6 +45,16 @@ log() {
 file_compression() {
     BASE_NAME=$(basename "$1")
     DIR_NAME=$(dirname "$1")
+
+    if [ ! -e "$BACKUP_DIR" ]; then
+        mkdir -p "$BACKUP_DIR"
+
+        if [ $? -ne 0 ]; then
+            echo "Error creating backup directory: $BACKUP_DIR"
+            log "Error creating backup directory: $BACKUP_DIR"
+            return 1
+        fi
+    fi
     
     if [ "$DRY_RUN" == false ]; then
         if [ -e "$1" ]; then
@@ -99,8 +108,8 @@ restore() {
             mkdir -p "$2"
 
             if [ $? -ne 0 ]; then
-                echo "Error creating destination directory."
-                log "Error creating destination directory"
+                echo "Error creating destination directory: $2"
+                log "Error creating destination directory: $2"
                 return 1
             fi
         fi
@@ -132,7 +141,24 @@ list() {
     log "Remote listed"
 }
 
-log "Starting backup"
+check_dependencies() {
+    has_failed=0
+
+    for cmd in "${DEPENDENCIES[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            echo "The required command $cmd was not found."
+            log "The required command $cmd was not found"
+            has_failed=1
+        fi
+    done
+
+    if [ "$has_failed" -ne 0 ]; then
+        echo "Please install the missing programs before continuing."
+        return 1
+    fi
+
+    return 0
+}
 
 if [ "$#" -eq 0 ]; then
     echo "Usage: ./backup.sh <file|directory> [file|directory ...]"
@@ -143,6 +169,12 @@ fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -r | --restore)
+            check_dependencies
+
+            if [ $? -ne 0 ]; then
+                exit 1
+            fi
+
             if [ "$#" -eq 2 ]; then
                 restore "$2"
             elif [ "$#" -eq 3 ]; then
@@ -160,16 +192,35 @@ while [ "$#" -gt 0 ]; do
             ;;
 
         -l | --list)
+            check_dependencies
+
+            if [ $? -ne 0 ]; then
+                exit 1
+            fi
+
             list
-            exit 0
+            exit $?
             ;;
 
         -d | --dry-run)
+            check_dependencies
+
+            if [ $? -ne 0 ]; then
+                exit 1
+            fi
+
             DRY_RUN=true
             log "[DRY-RUN] Running with dry-run"
             ;;
 
         *)
+            check_dependencies
+
+            if [ $? -ne 0 ]; then
+                exit 1
+            fi
+
+            log "Starting backup"
             file_compression "$1"
 
             if [ $? -ne 0 ]; then
