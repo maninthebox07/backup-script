@@ -212,11 +212,12 @@ while [ "$#" -gt 0 ]; do
             ;;
 
         *)
-            if [[ "$1" == -* ]]; then
+            if [[ "$1" == -* && ! -e "$1" ]]; then
                 echo "Error: unknown option: $1"
                 log "Error: unknown option: $1"
                 exit 1
             fi
+
             FILES+=("$1")
             ;;
     esac
@@ -307,14 +308,12 @@ if [ "${#FILES[@]}" -gt 0 ]; then
 
     if [ "$DRY_RUN" == true ]; then
         log "[DRY-RUN] Sending to drive"
-        rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
-            --backup-dir "gdrive:files-history/$DATE" \
+        rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
             --progress \
             --dry-run
     else
         log "Sending to drive"
-        rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
-            --backup-dir "gdrive:files-history/$DATE" \
+        rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
             --progress
     fi
 
