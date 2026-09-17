@@ -3,8 +3,15 @@
 BACKUP_DIR="$HOME/Backups"
 DATE=$(date +%Y-%m-%d-%H-%M-%S)
 LOG_FILE="$HOME/Projects/bash-projects/backup-script/backup.log"
-DRY_RUN=false
 DEPENDENCIES=("tar" "rclone")
+DRY_RUN=false
+LIST=false
+RESTORE=false
+HELP=false
+FILES=()
+
+RESTORE_BACKUP=""
+RESTORE_DESTINATION=""
 
 usage() {
     echo "Usage: ./backup.sh [OPTIONS] <file|directory> ...
@@ -169,93 +176,147 @@ fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -r | --restore)
-            check_dependencies
+            RESTORE=true
 
-            if [ $? -ne 0 ]; then
-                exit 1
+            shift
+
+            if [ "$#" -ge 1 ]; then
+                RESTORE_BACKUP="$1"
             fi
 
-            if [ "$#" -eq 2 ]; then
-                restore "$2"
-            elif [ "$#" -eq 3 ]; then
-                restore "$2" "$3"
-            else
-                restore
+            if [ "$#" -ge 2 ]; then
+                RESTORE_DESTINATION="$2"
+                shift
             fi
-
-            exit $?
             ;;
 
         -h | --help)
-            usage
-            exit 0
+            HELP=true
             ;;
 
         -l | --list)
-            check_dependencies
-
-            if [ $? -ne 0 ]; then
-                exit 1
-            fi
-
-            list
-            exit $?
+            LIST=true
             ;;
 
         -d | --dry-run)
-            check_dependencies
-
-            if [ $? -ne 0 ]; then
-                exit 1
-            fi
-
             DRY_RUN=true
-            log "[DRY-RUN] Running with dry-run"
             ;;
 
         *)
-            check_dependencies
-
-            if [ $? -ne 0 ]; then
-                exit 1
-            fi
-
-            log "Starting backup"
-            file_compression "$1"
-
-            if [ $? -ne 0 ]; then
-                exit 1
-            fi
+            FILES+=("$1")
             ;;
     esac
 
     shift
 done
 
-if [ "$DRY_RUN" == true ]; then
-    log "[DRY-RUN] Sending to drive"
-    rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
-        --backup-dir "gdrive:files-history/$DATE" \
-        --progress \
-        --dry-run
-else
-    log "Sending to drive"
-    rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
-        --backup-dir "gdrive:files-history/$DATE" \
-        --progress
+if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+    echo "Error: --help cannot be combined with other options or files."
+    exit 1
 fi
 
-if [ $? -ne 0 ]; then
-    echo "rclone: Error sending to drive."
-    log "rclone: Error sending to drive"
+if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+    echo "Error: --list cannot be combined with other options or files."
     exit 1
-else
-    if [ "$DRY_RUN" == true ]; then
-        echo "[DRY-RUN] Backup simulation completed."
-        log "[DRY-RUN] Backup simulation completed"
-    else
-        echo "File(s) successfully sent to Drive."
-        log "File(s) successfully sent to Drive"
-        log "Backup completed successfully"
+fi
+
+if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+    echo "Error: --restore cannot be combined with other options or files."
+    exit 1
+fi
+
+if [[ "$DRY_RUN" == true && "${#FILES[@]}" -eq 0 ]]; then
+    echo "Error: --dry-run requires at least one file or directory."
+    exit 1
+fi
+
+if [[ "$RESTORE" == true && "$RESTORE_BACKUP" == "" ]]; then
+    echo "Error: --restore must have a backup file."
+    exit 1
+fi
+
+if [ "$HELP" == true ]; then
+    usage
+    exit 0
+fi
+
+if [ "$LIST" == true ]; then
+    check_dependencies
+
+    if [ $? -ne 0 ]; then
+        exit 1
     fi
+
+    list
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$RESTORE" == true ]; then
+    check_dependencies
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+
+    if [ -n "$RESTORE_DESTINATION" ]; then
+        restore "$RESTORE_BACKUP" "$RESTORE_DESTINATION"
+    else
+        restore "$RESTORE_BACKUP"
+    fi
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "${#FILES[@]}" -gt 0 ]; then
+    check_dependencies
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+
+
+    for file in "${FILES[@]}"; do
+
+        log "Starting backup"
+
+        file_compression "$file"
+
+        if [ $? -ne 0 ]; then
+            exit 1
+        fi
+    done
+
+    if [ "$DRY_RUN" == true ]; then
+        log "[DRY-RUN] Sending to drive"
+        rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
+            --backup-dir "gdrive:files-history/$DATE" \
+            --progress \
+            --dry-run
+    else
+        log "Sending to drive"
+        rclone sync "$BACKUP_DIR" "gdrive:files-backup" \
+            --backup-dir "gdrive:files-history/$DATE" \
+            --progress
+    fi
+
+    if [ $? -ne 0 ]; then
+        echo "rclone: Error sending to drive."
+        log "rclone: Error sending to drive"
+        exit 1
+    else
+        if [ "$DRY_RUN" == true ]; then
+            echo "[DRY-RUN] Backup simulation completed."
+            log "[DRY-RUN] Backup simulation completed"
+        else
+            echo "File(s) successfully sent to Drive."
+            log "File(s) successfully sent to Drive"
+            log "Backup completed successfully"
+        fi
+    fi
+
 fi
