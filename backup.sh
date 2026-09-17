@@ -212,6 +212,11 @@ while [ "$#" -gt 0 ]; do
             ;;
 
         *)
+            if [[ "$1" == -* ]]; then
+                echo "Error: unknown option: $1"
+                log "Error: unknown option: $1"
+                exit 1
+            fi
             FILES+=("$1")
             ;;
     esac
