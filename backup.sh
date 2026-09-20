@@ -3,11 +3,12 @@
 BACKUP_DIR="$HOME/Backups"
 DATE=$(date +%Y-%m-%d-%H-%M-%S)
 LOG_FILE="$HOME/Projects/bash-projects/backup-script/backup.log"
-DEPENDENCIES=("tar" "rclone")
+DEPENDENCIES=("tar" "rclone" "pacman")
 DRY_RUN=false
 LIST=false
 RESTORE=false
 HELP=false
+PACKAGES=false
 FILES=()
 
 RESTORE_BACKUP=""
@@ -30,6 +31,9 @@ Options:
 
     -d, --dry-run
         Show what would be done without actually performing the backup.
+    
+    -p, --packages
+        Save lists of installed official and AUR packages.
 
     -h, --help
         Show this help message.
@@ -40,7 +44,8 @@ Examples:
     ./backup.sh --restore backup.tar.gz
     ./backup.sh --restore backup.tar.gz ~/Restored
     ./backup.sh --list
-    ./backup.sh --dry-run ~/Documents"
+    ./backup.sh --dry-run ~/Documents
+    ./backup.sh --packages"
 
     return 0
 }
@@ -176,6 +181,41 @@ check_dependencies() {
     return 0
 }
 
+package_backup() {
+    mkdir -p "$BACKUP_DIR"
+
+    if [ $? -ne 0 ]; then
+        echo "Error creating backup directory: $BACKUP_DIR"
+        log "Error creating backup directory: $BACKUP_DIR"
+        return 1
+    fi
+
+    echo "Saving official packages."
+    log "Saving official packages"
+    pacman -Qqe > "$BACKUP_DIR/packages-$DATE.txt"
+
+    if [ $? -ne 0 ]; then
+        echo "Error saving official packages."
+        log "Error saving official packages"
+
+        return 1
+    fi
+
+    echo "Saving AUR packages."
+    log "Saving AUR packages"
+    pacman -Qqem > "$BACKUP_DIR/aur-packages-$DATE.txt"
+
+    if [ $? -ne 0 ]; then
+        echo "Error saving AUR packages."
+        log "Error saving AUR packages"
+
+        return 1
+    fi
+
+    echo "Packages successfully saved."
+    log "Packages successfully saved"
+}
+
 if [ "$#" -eq 0 ]; then
     echo "Usage: ./backup.sh <file|directory> [file|directory ...]"
     log "Error. No arguments entered."
@@ -210,7 +250,9 @@ while [ "$#" -gt 0 ]; do
         -d | --dry-run)
             DRY_RUN=true
             ;;
-
+        -p | --packages)
+            PACKAGES=true
+            ;;
         *)
             if [[ "$1" == -* && ! -e "$1" ]]; then
                 echo "Error: unknown option: $1"
@@ -225,18 +267,23 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --help cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --list cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --restore cannot be combined with other options or files."
+    exit 1
+fi
+
+if [[ "$PACKAGES" == true && ( "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+    echo "Error: --packages cannot be combined with other options or files."
     exit 1
 fi
 
@@ -287,13 +334,40 @@ if [ "$RESTORE" == true ]; then
     fi
 fi
 
-if [ "${#FILES[@]}" -gt 0 ]; then
+if [ "$PACKAGES" == true ]; then
     check_dependencies
 
     if [ $? -ne 0 ]; then
         exit 1
     fi
 
+    package_backup
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+
+    log "Sending packages backup to drive"
+    rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
+    --include "*.txt" \
+    --progress
+
+    if [ $? -ne 0 ]; then
+        echo "rclone: Error sending to drive."
+        log "rclone: Error sending to drive"
+        exit 1
+    fi
+
+    echo "Packages backup successfully sent to Drive."
+    log "Packages backup successfully sent to Drive"
+fi
+
+if [ "${#FILES[@]}" -gt 0 ]; then
+    check_dependencies
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
 
     for file in "${FILES[@]}"; do
 
