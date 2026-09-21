@@ -10,7 +10,7 @@ Instead of using an existing backup solution, I decided to build something mysel
 
 This is a **personal project**, made primarily for **my own use and learning**. It's not meant to be a complete or universal backup solution.
 
-The project has also been a way for me to practice working with command-line tools, Git, error handling, logs, package management, and `rclone`.
+The project has also been a way for me to practice working with command-line tools, Git, error handling, logs, package management, scheduling, and `rclone`.
 
 ## What it does
 
@@ -31,6 +31,8 @@ The script can:
 * Save lists of explicitly installed official and AUR packages
 * Restore official packages using `pacman`
 * Restore AUR packages using `yay`
+* Automatically remove old backups according to the configured retention policy
+* Run scheduled backups using `systemd`
 
 ## Requirements
 
@@ -43,16 +45,18 @@ The script can:
 
 `yay` is only required when restoring AUR packages.
 
+`systemd` is required for the optional automatic backup scheduling.
+
 ## Configuration
 
 The script currently uses the following paths and `rclone` settings:
 
-| Setting                 | Value                                               |
-| ----------------------- | --------------------------------------------------- |
-| Local backup directory  | `~/Backups/`                                        |
-| `rclone` remote         | `gdrive`                                            |
-| Remote backup directory | `gdrive:files-backup`                               |
-| Log file                | `~/Projects/bash-projects/backup-script/backup.log` |
+| Setting | Value |
+| --- | --- |
+| Local backup directory | `~/Backups/` |
+| `rclone` remote | `gdrive` |
+| Remote backup directory | `gdrive:files-backup` |
+| Log file | `~/Projects/bash-projects/backup-script/backup.log` |
 
 These names and paths were chosen for my own setup.
 
@@ -66,6 +70,7 @@ Clone the repository:
 
 ```bash
 git clone git@github.com:maninthebox07/backup-script.git
+
 cd backup-script
 ```
 
@@ -125,8 +130,11 @@ Example:
 $ ./backup.sh --list
 
 /
+
 ├── documents-2026-09-17-18-41-58.tar.gz
+
 ├── documents-2026-09-17-18-57-19.tar.gz
+
 └── photos-2026-09-17-19-09-50.tar.gz
 ```
 
@@ -225,6 +233,96 @@ or:
 ./backup.sh -h
 ```
 
+## Backup retention
+
+The script automatically removes older backups from the remote repository according to a retention policy.
+
+The current configuration keeps:
+
+* **4 latest backups per file/directory**
+* **4 latest package backup sets**
+
+For package backups, the official and AUR package lists are treated as a pair and share the same timestamp.
+
+Retention is applied only after a successful upload.
+
+This allows the remote repository to keep a limited history of backups without growing indefinitely.
+
+## Automatic backups with systemd
+
+The project includes optional `systemd` user units for automatically running backups.
+
+The units are located in:
+
+```text
+systemd/
+├── backup-files.service
+├── backup-files.timer
+├── backup-packages.service
+└── backup-packages.timer
+```
+
+The file backup service runs:
+
+```bash
+./backup.sh ~/Projects/ ~/Pictures/ ~/DocumentosPessoais/
+```
+
+and is scheduled to run every 14 days.
+
+The package backup service runs:
+
+```bash
+./backup.sh --packages
+```
+
+and is scheduled to run every Sunday at 14:00.
+
+### Installing the systemd units
+
+Copy the units to the user systemd directory:
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cp systemd/*.service systemd/*.timer ~/.config/systemd/user/
+```
+
+Reload the user systemd manager:
+
+```bash
+systemctl --user daemon-reload
+```
+
+Enable the timers:
+
+```bash
+systemctl --user enable --now backup-files.timer
+systemctl --user enable --now backup-packages.timer
+```
+
+Check their status:
+
+```bash
+systemctl --user list-timers --all
+```
+
+The services can also be tested manually:
+
+```bash
+systemctl --user start backup-files.service
+systemctl --user start backup-packages.service
+```
+
+Logs from the services can be viewed with:
+
+```bash
+journalctl --user -u backup-files.service
+journalctl --user -u backup-packages.service
+```
+
+The timers are configured as user services, so they operate within the user's environment and home directory.
+
 ## How it works
 
 ### File backups
@@ -233,17 +331,29 @@ The basic workflow is:
 
 ```text
 Files / Directories
+
         │
+
         ▼
+
    tar (.tar.gz)
+
         │
+
         ▼
+
   ~/Backups/
+
         │
+
         ▼
+
      rclone
+
         │
+
         ▼
+
    Google Drive
 ```
 
@@ -251,30 +361,76 @@ Each backup gets a timestamp in its filename, so running the script multiple tim
 
 The script uses `rclone copy` rather than `rclone sync`. This is intentional: I want Google Drive to act as a backup repository, so deleting a local file should not cause an existing remote backup to be deleted.
 
+After a successful upload, the retention policy checks the existing remote backups and removes older ones when necessary.
+
 ### Package backups
 
 Package backups use the local `pacman` database to generate package lists.
 
 ```text
         Installed packages
+
                │
+
         ┌──────┴──────┐
+
         ▼             ▼
+
    Official          AUR /
    packages         foreign
+
         │             │
+
         ▼             ▼
+
     pacman -Qqen   pacman -Qqem
+
         │             │
+
         └──────┬──────┘
+
                ▼
+
           Package lists
+
                │
+
                ▼
+
            Google Drive
 ```
 
 During restoration, the official package list is passed to `pacman`, while the AUR package list is passed to `yay`.
+
+Package backups are also subject to the retention policy.
+
+### Automatic scheduling
+
+Automatic backups are handled by `systemd` timers.
+
+```text
+backup-files.timer
+        │
+        ▼
+backup-files.service
+        │
+        ▼
+   backup.sh
+```
+
+and:
+
+```text
+backup-packages.timer
+        │
+        ▼
+backup-packages.service
+        │
+        ▼
+   backup.sh --packages
+```
+
+The timers are responsible only for scheduling the jobs. The actual backup logic remains inside `backup.sh`.
 
 ## Logs
 
@@ -293,6 +449,8 @@ The log records things such as:
 * Errors
 * Interruptions
 
+When backups are run through `systemd`, additional service logs can be inspected through the systemd journal.
+
 The log file is excluded from Git through `.gitignore`.
 
 ## Security
@@ -307,10 +465,8 @@ The backup archives themselves may contain sensitive personal data, so they shou
 
 This is still a relatively small project and there are things I may improve over time.
 
-For example:
+Current limitations include:
 
-* No automatic scheduled backups yet
-* No built-in backup retention policy
 * No built-in encryption
 * Configuration is currently tailored to my own setup
 * Package backups store package names, not exact versions
@@ -334,6 +490,9 @@ Along the way, I've practiced:
 * Package management with `pacman`
 * AUR package management with `yay`
 * Logging
+* Backup retention and cleanup
+* Scheduling with `systemd`
+* `systemd` services and timers
 * Testing failure scenarios
 * Git and GitHub
 * Working with branches and merges
@@ -343,12 +502,12 @@ Along the way, I've practiced:
 
 Some things I may experiment with in the future:
 
-* Scheduled backups with `cron` or `systemd`
 * Better configuration options
-* Backup retention and cleanup
 * More restore options
 * Further improvements to error handling
 * Better handling of package restoration failures
+* Backup encryption
+* Additional backup targets or storage providers
 
 ---
 
