@@ -10,7 +10,7 @@ Instead of using an existing backup solution, I decided to build something mysel
 
 This is a **personal project**, made primarily for **my own use and learning**. It's not meant to be a complete or universal backup solution.
 
-The project has also been a way for me to practice working with command-line tools, Git, error handling, logs, and `rclone`.
+The project has also been a way for me to practice working with command-line tools, Git, error handling, logs, package management, and `rclone`.
 
 ## What it does
 
@@ -28,6 +28,9 @@ The script can:
 * Validate arguments and required dependencies
 * Keep a log of operations
 * Handle interruptions with `Ctrl+C`
+* Save lists of explicitly installed official and AUR packages
+* Restore official packages using `pacman`
+* Restore AUR packages using `yay`
 
 ## Requirements
 
@@ -35,18 +38,21 @@ The script can:
 * Bash
 * `tar`
 * `rclone`
+* `pacman`
 * A configured Google Drive remote in `rclone`
+
+`yay` is only required when restoring AUR packages.
 
 ## Configuration
 
 The script currently uses the following paths and `rclone` settings:
 
-| Setting                 | Value                 |
-| ----------------------- | --------------------- |
-| Local backup directory  | `~/Backups/`          |
-| `rclone` remote         | `gdrive`              |
-| Remote backup directory | `gdrive:files-backup` |
-| Log file                | `backup.log`          |
+| Setting                 | Value                                               |
+| ----------------------- | --------------------------------------------------- |
+| Local backup directory  | `~/Backups/`                                        |
+| `rclone` remote         | `gdrive`                                            |
+| Remote backup directory | `gdrive:files-backup`                               |
+| Log file                | `~/Projects/bash-projects/backup-script/backup.log` |
 
 These names and paths were chosen for my own setup.
 
@@ -99,17 +105,7 @@ and then uploaded to:
 gdrive:files-backup
 ```
 
-A typical backup might look like this:
-
-```text
-$ ./backup.sh ~/Documents
-
-Creating compressed file...
-Backup created successfully.
-Sending to drive...
-Backup uploaded successfully.
-Backup completed.
-```
+Each backup receives a timestamped filename.
 
 ### List backups
 
@@ -148,6 +144,8 @@ You can also specify a destination:
 ./backup.sh --restore backup-name.tar.gz /path/to/destination
 ```
 
+When a destination is provided, the archive is extracted there.
+
 `--restore` is an exclusive operation and cannot be combined with other options or backup targets.
 
 ### Dry run
@@ -164,6 +162,57 @@ or:
 ./backup.sh -d /path/to/file
 ```
 
+### Package backup
+
+The script can save lists of explicitly installed packages:
+
+```bash
+./backup.sh --packages
+```
+
+or:
+
+```bash
+./backup.sh -p
+```
+
+This creates two files:
+
+```text
+packages-YYYY-MM-DD-HH-MM-SS.txt
+aur-packages-YYYY-MM-DD-HH-MM-SS.txt
+```
+
+The first contains explicitly installed packages from the configured repositories, while the second contains explicitly installed foreign packages, such as AUR packages.
+
+The package lists contain package names rather than exact package versions. This means restoration uses the versions currently available from the configured repositories or AUR at the time of restoration.
+
+### Restore packages
+
+To restore a package backup:
+
+```bash
+./backup.sh --restore-packages packages-2026-09-20-21-30-00.txt
+```
+
+The script automatically looks for the corresponding AUR package list using the same timestamp.
+
+Official packages are restored using:
+
+```bash
+pacman
+```
+
+AUR packages are restored using:
+
+```bash
+yay
+```
+
+Packages that are already installed are skipped when possible.
+
+> **Note:** AUR packages are not guaranteed to remain available or build successfully in the future. A package may be removed from the AUR, have changed sources or checksums, require manual intervention, or conflict with another installed package. Some AUR packages may therefore require manual restoration.
+
 ### Help
 
 ```bash
@@ -177,6 +226,8 @@ or:
 ```
 
 ## How it works
+
+### File backups
 
 The basic workflow is:
 
@@ -200,15 +251,47 @@ Each backup gets a timestamp in its filename, so running the script multiple tim
 
 The script uses `rclone copy` rather than `rclone sync`. This is intentional: I want Google Drive to act as a backup repository, so deleting a local file should not cause an existing remote backup to be deleted.
 
+### Package backups
+
+Package backups use the local `pacman` database to generate package lists.
+
+```text
+        Installed packages
+               │
+        ┌──────┴──────┐
+        ▼             ▼
+   Official          AUR /
+   packages         foreign
+        │             │
+        ▼             ▼
+    pacman -Qqen   pacman -Qqem
+        │             │
+        └──────┬──────┘
+               ▼
+          Package lists
+               │
+               ▼
+           Google Drive
+```
+
+During restoration, the official package list is passed to `pacman`, while the AUR package list is passed to `yay`.
+
 ## Logs
 
 The script keeps a log of its operations in:
 
 ```text
-backup.log
+~/Projects/bash-projects/backup-script/backup.log
 ```
 
-The log records things such as backup operations, uploads, restores, errors, and interruptions.
+The log records things such as:
+
+* Backup operations
+* Uploads
+* Restores
+* Package operations
+* Errors
+* Interruptions
 
 The log file is excluded from Git through `.gitignore`.
 
@@ -217,6 +300,8 @@ The log file is excluded from Git through `.gitignore`.
 This project is intended for personal use.
 
 Sensitive information such as credentials, tokens, personal files, or private `rclone` configuration should never be committed to this repository.
+
+The backup archives themselves may contain sensitive personal data, so they should be protected appropriately.
 
 ## Current limitations
 
@@ -228,6 +313,9 @@ For example:
 * No built-in backup retention policy
 * No built-in encryption
 * Configuration is currently tailored to my own setup
+* Package backups store package names, not exact versions
+* AUR packages may become unavailable or fail to build in the future
+* Some AUR package conflicts or build problems may require manual intervention
 
 These are not necessarily problems for my current use case, but they are areas I may explore in the future.
 
@@ -243,9 +331,13 @@ Along the way, I've practiced:
 * Exit codes and error handling
 * File compression with `tar`
 * Remote file management with `rclone`
+* Package management with `pacman`
+* AUR package management with `yay`
 * Logging
+* Testing failure scenarios
 * Git and GitHub
-* Testing different failure scenarios
+* Working with branches and merges
+* Writing documentation
 
 ## Future ideas
 
@@ -256,6 +348,7 @@ Some things I may experiment with in the future:
 * Backup retention and cleanup
 * More restore options
 * Further improvements to error handling
+* Better handling of package restoration failures
 
 ---
 
