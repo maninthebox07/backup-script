@@ -1,0 +1,10 @@
+[Unit]
+Description=Files Backup Schedule
+
+[Timer]
+OnStartupSec=15min
+OnUnitActiveSec=14d
+Unit=backup-files.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Packages Backup Schedule
+
+[Timer]
+OnCalendar=Sun *-*-* 14:00
+Persistent=true
+Unit=backup-packages.service
+
+[Install]
+WantedBy=timers.target

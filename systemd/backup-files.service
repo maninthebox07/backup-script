@@ -1,0 +1,6 @@
+[Unit]
+Description=Files Backup Service
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/bash-projects/backup-script/backup.sh %h/Projects/ %h/Pictures/ %h/DocumentosPessoais/
