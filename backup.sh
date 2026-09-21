@@ -16,6 +16,9 @@ RESTORE_BACKUP=""
 RESTORE_DESTINATION=""
 RESTORE_PACKAGES_BACKUP=""
 
+RETENTION_FILES=4
+RETENTION_PACKAGES=4
+
 usage() {
     echo "Usage: ./backup.sh [OPTIONS] <file|directory> ...
 
@@ -253,6 +256,85 @@ restore_packages() {
     fi
 }
 
+cleanup_file_backups() {
+    local base_name="$1"
+    local keep="$RETENTION_FILES"
+
+    mapfile -t backups < <(
+        rclone lsf "gdrive:files-backup" --files-only |
+        grep "^${base_name}-.*\.tar\.gz$" |
+        sort -r
+    )
+
+    if [[ "${#backups[@]}" -le "$keep" ]]; then
+        echo "No old backups to remove."
+        return 0
+    fi
+
+    echo "Backups that will be kept:"
+    for ((i=0; i<keep; i++)); do
+        echo "  ${backups[$i]}"
+    done
+
+    echo "Removing old backups:"
+
+    for ((i=keep; i<${#backups[@]}; i++)); do
+        echo "  ${backups[$i]}"
+
+        if ! rclone deletefile "gdrive:files-backup/${backups[$i]}"; then
+            echo "Error removing ${backups[$i]}"
+            log "Error removing ${backups[$i]}"
+            return 1
+        fi
+    done
+}
+
+cleanup_package_backups() {
+    local keep="$RETENTION_PACKAGES"
+
+    mapfile -t backups < <(
+        rclone lsf "gdrive:files-backup" --files-only |
+        grep "^packages-.*\.txt$" |
+        sort -r
+    )
+
+    if [[ "${#backups[@]}" -le "$keep" ]]; then
+        echo "No old package backups to remove."
+        return 0
+    fi
+
+    echo "Package backups that will be kept:"
+    for ((i=0; i<keep; i++)); do
+        echo "  ${backups[$i]}"
+
+        local timestamp="${backups[$i]#packages-}"
+        echo "  aur-packages-$timestamp"
+    done
+
+    echo "Removing old package backups:"
+
+    for ((i=keep; i<${#backups[@]}; i++)); do
+        local official="${backups[$i]}"
+        local timestamp="${official#packages-}"
+        local aur="aur-packages-$timestamp"
+
+        echo "  $official"
+        echo "  $aur"
+
+        if ! rclone deletefile "gdrive:files-backup/$official"; then
+            echo "Error removing $official"
+            log "Error removing $official"
+            return 1
+        fi
+
+        if ! rclone deletefile "gdrive:files-backup/$aur"; then
+            echo "Error removing $aur"
+            log "Error removing $aur"
+            return 1
+        fi
+    done
+}
+
 if [ "$#" -eq 0 ]; then
     echo "Usage: ./backup.sh <file|directory> [file|directory ...]"
     log "Error. No arguments entered."
@@ -434,6 +516,10 @@ if [ "$PACKAGES" == true ]; then
 
     echo "Packages backup successfully sent to Drive."
     log "Packages backup successfully sent to Drive"
+
+    if ! cleanup_package_backups; then
+        exit 1
+    fi
 fi
 
 if [ "$RESTORE_PACKAGES" == true ]; then
@@ -470,6 +556,9 @@ if [ "${#FILES[@]}" -gt 0 ]; then
             log "rclone: Error sending to drive"
             exit 1
         fi
+
+        echo "[DRY-RUN] Backup simulation completed."
+        log "[DRY-RUN] Backup simulation completed"
     else
         log "Sending to drive"
 
@@ -479,14 +568,18 @@ if [ "${#FILES[@]}" -gt 0 ]; then
             log "rclone: Error sending to drive"
             exit 1
         fi
-    fi
 
-    if [ "$DRY_RUN" == true ]; then
-        echo "[DRY-RUN] Backup simulation completed."
-        log "[DRY-RUN] Backup simulation completed"
-    else
         echo "File(s) successfully sent to Drive."
         log "File(s) successfully sent to Drive"
+
+        for file in "${FILES[@]}"; do
+            BASE_NAME=$(basename "$file")
+
+            if ! cleanup_file_backups "$BASE_NAME"; then
+                exit 1
+            fi
+        done
+
         log "Backup completed successfully"
     fi
 fi
