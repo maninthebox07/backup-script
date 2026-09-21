@@ -74,9 +74,7 @@ file_compression() {
     DIR_NAME=$(dirname "$1")
 
     if [ ! -e "$BACKUP_DIR" ]; then
-        mkdir -p "$BACKUP_DIR"
-
-        if [ $? -ne 0 ]; then
+        if ! mkdir -p "$BACKUP_DIR"; then
             echo "Error creating backup directory: $BACKUP_DIR"
             log "Error creating backup directory: $BACKUP_DIR"
             return 1
@@ -87,10 +85,9 @@ file_compression() {
         if [ -e "$1" ]; then
 
             log "Creating compressed file"
-            tar -czf "$BACKUP_DIR/$BASE_NAME-$DATE.tar.gz" \
-                -C "$DIR_NAME" "$BASE_NAME"
 
-            if [ $? -ne 0 ]; then
+            if ! tar -czf "$BACKUP_DIR/$BASE_NAME-$DATE.tar.gz" \
+                -C "$DIR_NAME" "$BASE_NAME"; then
                 echo "Error creating backup for $1."
                 log "Error creating backup for $1"
                 return 1
@@ -121,9 +118,8 @@ restore() {
 
     echo "Restoring file from drive."
     log "Restoring file from drive"
-    rclone copy "gdrive:files-backup/$1" "$HOME"
 
-    if [ $? -ne 0 ]; then
+    if ! rclone copy "gdrive:files-backup/$1" "$HOME"; then
         echo "Error restoring the file."
         log "Error restoring the file"
         return 1
@@ -132,9 +128,8 @@ restore() {
     if [ "$#" -eq 2 ]; then
         if [ ! -d "$2" ]; then
             log "Creating destination directory"
-            mkdir -p "$2"
 
-            if [ $? -ne 0 ]; then
+            if ! mkdir -p "$2"; then
                 echo "Error creating destination directory: $2"
                 log "Error creating destination directory: $2"
                 return 1
@@ -143,9 +138,8 @@ restore() {
 
         echo "Extracting backup."
         log "Extracting backup"
-        tar -xzf "$HOME/$1" -C "$2"
 
-        if [ $? -ne 0 ]; then
+        if ! tar -xzf "$HOME/$1" -C "$2"; then
             echo "Error extracting backup."
             log "Error extracting backup"
             return 1
@@ -159,12 +153,12 @@ restore() {
 
 list() {
     log "Listing remote"
-    rclone tree gdrive:files-backup
 
-    if [ $? -ne 0 ]; then
+    if ! rclone tree gdrive:files-backup; then
         log "Error listing remote"
         return 1
     fi
+
     log "Remote listed"
 }
 
@@ -188,9 +182,7 @@ check_dependencies() {
 }
 
 package_backup() {
-    mkdir -p "$BACKUP_DIR"
-
-    if [ $? -ne 0 ]; then
+    if ! mkdir -p "$BACKUP_DIR"; then
         echo "Error creating backup directory: $BACKUP_DIR"
         log "Error creating backup directory: $BACKUP_DIR"
         return 1
@@ -198,23 +190,19 @@ package_backup() {
 
     echo "Saving official packages."
     log "Saving official packages"
-    pacman -Qqen > "$BACKUP_DIR/packages-$DATE.txt"
 
-    if [ $? -ne 0 ]; then
+    if ! pacman -Qqen > "$BACKUP_DIR/packages-$DATE.txt"; then
         echo "Error saving official packages."
         log "Error saving official packages"
-
         return 1
     fi
 
     echo "Saving AUR packages."
     log "Saving AUR packages"
-    pacman -Qqem > "$BACKUP_DIR/aur-packages-$DATE.txt"
 
-    if [ $? -ne 0 ]; then
+    if ! pacman -Qqem > "$BACKUP_DIR/aur-packages-$DATE.txt"; then
         echo "Error saving AUR packages."
         log "Error saving AUR packages"
-
         return 1
     fi
 
@@ -222,7 +210,7 @@ package_backup() {
     log "Packages successfully saved"
 }
 
-restore_packages(){
+restore_packages() {
     if [[ "$#" -ne 1 ]]; then
         echo "Usage: --restore-packages <backup>"
         return 1
@@ -233,25 +221,20 @@ restore_packages(){
 
     echo "Restoring packages from drive."
     log "Restoring packages from drive"
-    rclone copy "gdrive:files-backup/$1" "$HOME"
 
-    if [ $? -ne 0 ]; then
+    if ! rclone copy "gdrive:files-backup/$1" "$HOME"; then
         echo "Error restoring the official packages file."
         log "Error restoring the official packages file"
         return 1
     fi
 
-    rclone copy "gdrive:files-backup/$AUR_BACKUP" "$HOME"
-
-    if [ $? -ne 0 ]; then
+    if ! rclone copy "gdrive:files-backup/$AUR_BACKUP" "$HOME"; then
         echo "Error restoring the AUR packages file."
         log "Error restoring the AUR packages file"
         return 1
     fi
 
-    pacman -S --needed - < "$HOME/$1"
-
-    if [ $? -ne 0 ]; then
+    if ! sudo pacman -S --needed - < "$HOME/$1"; then
         echo "Error installing official packages."
         log "Error installing official packages"
         return 1
@@ -263,9 +246,7 @@ restore_packages(){
         return 1
     fi
 
-    yay -S --needed - < "$HOME/$AUR_BACKUP"
-
-    if [ $? -ne 0 ]; then
+    if ! yay -Sa --needed - < "$HOME/$AUR_BACKUP"; then
         echo "Error installing the AUR packages."
         log "Error installing the AUR packages"
         return 1
@@ -306,9 +287,11 @@ while [ "$#" -gt 0 ]; do
         -d | --dry-run)
             DRY_RUN=true
             ;;
+
         -p | --packages)
             PACKAGES=true
             ;;
+
         -rp | --restore-packages)
             RESTORE_PACKAGES=true
 
@@ -318,6 +301,7 @@ while [ "$#" -gt 0 ]; do
                 RESTORE_PACKAGES_BACKUP="$1"
             fi
             ;;
+
         *)
             if [[ "$1" == -* && ! -e "$1" ]]; then
                 echo "Error: unknown option: $1"
@@ -332,27 +316,53 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$HELP" == true && (
+    "$LIST" == true ||
+    "$RESTORE" == true ||
+    "$DRY_RUN" == true ||
+    "$PACKAGES" == true ||
+    "$RESTORE_PACKAGES" == true ||
+    "${#FILES[@]}" -gt 0
+) ]]; then
     echo "Error: --help cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$LIST" == true && (
+    "$RESTORE" == true ||
+    "$DRY_RUN" == true ||
+    "$PACKAGES" == true ||
+    "$RESTORE_PACKAGES" == true ||
+    "${#FILES[@]}" -gt 0
+) ]]; then
     echo "Error: --list cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$RESTORE" == true && (
+    "$DRY_RUN" == true ||
+    "$PACKAGES" == true ||
+    "$RESTORE_PACKAGES" == true ||
+    "${#FILES[@]}" -gt 0
+) ]]; then
     echo "Error: --restore cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$PACKAGES" == true && ( "$DRY_RUN" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$PACKAGES" == true && (
+    "$DRY_RUN" == true ||
+    "$RESTORE_PACKAGES" == true ||
+    "${#FILES[@]}" -gt 0
+) ]]; then
     echo "Error: --packages cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$RESTORE_PACKAGES" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$RESTORE_PACKAGES" == true && (
+    "$DRY_RUN" == true ||
+    "$PACKAGES" == true ||
+    "${#FILES[@]}" -gt 0
+) ]]; then
     echo "Error: --restore-packages cannot be combined with other options or files."
     exit 1
 fi
@@ -370,7 +380,6 @@ fi
 if [[ "$RESTORE_PACKAGES" == true && "$RESTORE_PACKAGES_BACKUP" == "" ]]; then
     echo "Error: --restore-packages must have a package backup file."
     exit 1
-
 fi
 
 if [ "$HELP" == true ]; then
@@ -379,56 +388,45 @@ if [ "$HELP" == true ]; then
 fi
 
 if [ "$LIST" == true ]; then
-    check_dependencies
-
-    if [ $? -ne 0 ]; then
+    if ! check_dependencies; then
         exit 1
     fi
 
-    list
-
-    if [ $? -ne 0 ]; then
+    if ! list; then
         exit 1
     fi
 fi
 
 if [ "$RESTORE" == true ]; then
-    check_dependencies
-
-    if [ $? -ne 0 ]; then
+    if ! check_dependencies; then
         exit 1
     fi
 
     if [ -n "$RESTORE_DESTINATION" ]; then
-        restore "$RESTORE_BACKUP" "$RESTORE_DESTINATION"
+        if ! restore "$RESTORE_BACKUP" "$RESTORE_DESTINATION"; then
+            exit 1
+        fi
     else
-        restore "$RESTORE_BACKUP"
-    fi
-
-    if [ $? -ne 0 ]; then
-        exit 1
+        if ! restore "$RESTORE_BACKUP"; then
+            exit 1
+        fi
     fi
 fi
 
 if [ "$PACKAGES" == true ]; then
-    check_dependencies
-
-    if [ $? -ne 0 ]; then
+    if ! check_dependencies; then
         exit 1
     fi
 
-    package_backup
-
-    if [ $? -ne 0 ]; then
+    if ! package_backup; then
         exit 1
     fi
 
     log "Sending packages backup to drive"
-    rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
-    --include "*.txt" \
-    --progress
 
-    if [ $? -ne 0 ]; then
+    if ! rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
+        --include "*.txt" \
+        --progress; then
         echo "rclone: Error sending to drive."
         log "rclone: Error sending to drive"
         exit 1
@@ -439,23 +437,17 @@ if [ "$PACKAGES" == true ]; then
 fi
 
 if [ "$RESTORE_PACKAGES" == true ]; then
-    check_dependencies
-
-    if [ $? -ne 0 ]; then
+    if ! check_dependencies; then
         exit 1
     fi
 
-    restore_packages "$RESTORE_PACKAGES_BACKUP"
-
-    if [ $? -ne 0 ]; then
+    if ! restore_packages "$RESTORE_PACKAGES_BACKUP"; then
         exit 1
     fi
 fi
 
 if [ "${#FILES[@]}" -gt 0 ]; then
-    check_dependencies
-
-    if [ $? -ne 0 ]; then
+    if ! check_dependencies; then
         exit 1
     fi
 
@@ -463,36 +455,38 @@ if [ "${#FILES[@]}" -gt 0 ]; then
 
         log "Starting backup"
 
-        file_compression "$file"
-
-        if [ $? -ne 0 ]; then
+        if ! file_compression "$file"; then
             exit 1
         fi
     done
 
     if [ "$DRY_RUN" == true ]; then
         log "[DRY-RUN] Sending to drive"
-        rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
+
+        if ! rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
             --progress \
-            --dry-run
+            --dry-run; then
+            echo "rclone: Error sending to drive."
+            log "rclone: Error sending to drive"
+            exit 1
+        fi
     else
         log "Sending to drive"
-        rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
-            --progress
+
+        if ! rclone copy "$BACKUP_DIR" "gdrive:files-backup" \
+            --progress; then
+            echo "rclone: Error sending to drive."
+            log "rclone: Error sending to drive"
+            exit 1
+        fi
     fi
 
-    if [ $? -ne 0 ]; then
-        echo "rclone: Error sending to drive."
-        log "rclone: Error sending to drive"
-        exit 1
+    if [ "$DRY_RUN" == true ]; then
+        echo "[DRY-RUN] Backup simulation completed."
+        log "[DRY-RUN] Backup simulation completed"
     else
-        if [ "$DRY_RUN" == true ]; then
-            echo "[DRY-RUN] Backup simulation completed."
-            log "[DRY-RUN] Backup simulation completed"
-        else
-            echo "File(s) successfully sent to Drive."
-            log "File(s) successfully sent to Drive"
-            log "Backup completed successfully"
-        fi
+        echo "File(s) successfully sent to Drive."
+        log "File(s) successfully sent to Drive"
+        log "Backup completed successfully"
     fi
 fi
