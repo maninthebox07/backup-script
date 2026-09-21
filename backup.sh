@@ -9,10 +9,12 @@ LIST=false
 RESTORE=false
 HELP=false
 PACKAGES=false
+RESTORE_PACKAGES=false
 FILES=()
 
 RESTORE_BACKUP=""
 RESTORE_DESTINATION=""
+RESTORE_PACKAGES_BACKUP=""
 
 usage() {
     echo "Usage: ./backup.sh [OPTIONS] <file|directory> ...
@@ -35,6 +37,9 @@ Options:
     -p, --packages
         Save lists of installed official and AUR packages.
 
+    -rp, --restore-packages <backup>
+        Restore official and AUR packages from a package backup.
+
     -h, --help
         Show this help message.
 
@@ -45,7 +50,8 @@ Examples:
     ./backup.sh --restore backup.tar.gz ~/Restored
     ./backup.sh --list
     ./backup.sh --dry-run ~/Documents
-    ./backup.sh --packages"
+    ./backup.sh --packages
+    ./backup.sh --restore-packages packages-2026-09-20-21-30-00.txt"
 
     return 0
 }
@@ -192,7 +198,7 @@ package_backup() {
 
     echo "Saving official packages."
     log "Saving official packages"
-    pacman -Qqe > "$BACKUP_DIR/packages-$DATE.txt"
+    pacman -Qqen > "$BACKUP_DIR/packages-$DATE.txt"
 
     if [ $? -ne 0 ]; then
         echo "Error saving official packages."
@@ -214,6 +220,56 @@ package_backup() {
 
     echo "Packages successfully saved."
     log "Packages successfully saved"
+}
+
+restore_packages(){
+    if [[ "$#" -ne 1 ]]; then
+        echo "Usage: --restore-packages <backup>"
+        return 1
+    fi
+
+    TIMESTAMP="${1#packages-}"
+    AUR_BACKUP="aur-packages-$TIMESTAMP"
+
+    echo "Restoring packages from drive."
+    log "Restoring packages from drive"
+    rclone copy "gdrive:files-backup/$1" "$HOME"
+
+    if [ $? -ne 0 ]; then
+        echo "Error restoring the official packages file."
+        log "Error restoring the official packages file"
+        return 1
+    fi
+
+    rclone copy "gdrive:files-backup/$AUR_BACKUP" "$HOME"
+
+    if [ $? -ne 0 ]; then
+        echo "Error restoring the AUR packages file."
+        log "Error restoring the AUR packages file"
+        return 1
+    fi
+
+    pacman -S --needed - < "$HOME/$1"
+
+    if [ $? -ne 0 ]; then
+        echo "Error installing official packages."
+        log "Error installing official packages"
+        return 1
+    fi
+
+    if ! command -v yay >/dev/null 2>&1; then
+        echo "Error: yay is required to restore AUR packages."
+        log "Error: yay is required to restore AUR packages"
+        return 1
+    fi
+
+    yay -S --needed - < "$HOME/$AUR_BACKUP"
+
+    if [ $? -ne 0 ]; then
+        echo "Error installing the AUR packages."
+        log "Error installing the AUR packages"
+        return 1
+    fi
 }
 
 if [ "$#" -eq 0 ]; then
@@ -253,6 +309,15 @@ while [ "$#" -gt 0 ]; do
         -p | --packages)
             PACKAGES=true
             ;;
+        -rp | --restore-packages)
+            RESTORE_PACKAGES=true
+
+            shift
+
+            if [ "$#" -ge 1 ]; then
+                RESTORE_PACKAGES_BACKUP="$1"
+            fi
+            ;;
         *)
             if [[ "$1" == -* && ! -e "$1" ]]; then
                 echo "Error: unknown option: $1"
@@ -267,23 +332,28 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$HELP" == true && ( "$LIST" == true || "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --help cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$LIST" == true && ( "$RESTORE" == true || "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --list cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$RESTORE" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --restore cannot be combined with other options or files."
     exit 1
 fi
 
-if [[ "$PACKAGES" == true && ( "$DRY_RUN" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+if [[ "$PACKAGES" == true && ( "$DRY_RUN" == true || "$RESTORE_PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
     echo "Error: --packages cannot be combined with other options or files."
+    exit 1
+fi
+
+if [[ "$RESTORE_PACKAGES" == true && ( "$DRY_RUN" == true || "$PACKAGES" == true || "${#FILES[@]}" -gt 0 ) ]]; then
+    echo "Error: --restore-packages cannot be combined with other options or files."
     exit 1
 fi
 
@@ -295,6 +365,12 @@ fi
 if [[ "$RESTORE" == true && "$RESTORE_BACKUP" == "" ]]; then
     echo "Error: --restore must have a backup file."
     exit 1
+fi
+
+if [[ "$RESTORE_PACKAGES" == true && "$RESTORE_PACKAGES_BACKUP" == "" ]]; then
+    echo "Error: --restore-packages must have a package backup file."
+    exit 1
+
 fi
 
 if [ "$HELP" == true ]; then
@@ -360,6 +436,20 @@ if [ "$PACKAGES" == true ]; then
 
     echo "Packages backup successfully sent to Drive."
     log "Packages backup successfully sent to Drive"
+fi
+
+if [ "$RESTORE_PACKAGES" == true ]; then
+    check_dependencies
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
+
+    restore_packages "$RESTORE_PACKAGES_BACKUP"
+
+    if [ $? -ne 0 ]; then
+        exit 1
+    fi
 fi
 
 if [ "${#FILES[@]}" -gt 0 ]; then
